@@ -101,6 +101,46 @@
         #grid-svg circle:hover {
             filter: brightness(0.95);
         }
+
+        /* Drawing preview overlay */
+        #preview-layer {
+            pointer-events: none;
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+        }
+        /* Save/Load modal */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.2s, visibility 0.2s;
+        }
+        .modal-overlay.open { opacity: 1; visibility: visible; }
+        .modal-panel {
+            background: white; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+            min-width: 320px; max-width: 90vw; max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;
+        }
+        .modal-panel h2 { margin: 0; font-size: 1.1rem; font-weight: 600; color: #1e293b; }
+        .save-load-list { max-height: 280px; overflow-y: auto; }
+
+        .tool-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+        }
+        .tool-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .tool-btn:hover {
+            background: #e2e8f0;
+            color: #1e293b;
+        }
     </style>
 </head>
 <body class="h-screen flex flex-col md:flex-row text-slate-700">
@@ -182,6 +222,39 @@
                     <p class="text-[10px] text-slate-400 mt-1">Standard SS10 rhinestone is ~2.8mm</p>
                 </div>
             </div>
+
+            <hr class="border-slate-100">
+
+            <!-- Cylinder calculator -->
+            <div class="bg-slate-50 rounded-lg border border-slate-200 p-4 space-y-3">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-drum text-blue-500"></i>
+                    <label class="text-sm font-semibold text-slate-700">Cylinder → Unrolled</label>
+                </div>
+                <p class="text-xs text-slate-500">Enter cylinder height and diameter to get the flat (unrolled) rectangle size.</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">Height</label>
+                        <input type="number" id="cyl-height" value="3" step="0.01" min="0" class="w-full p-2 border border-slate-300 rounded text-slate-700 font-mono text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">Diameter</label>
+                        <input type="number" id="cyl-diameter" value="1.5" step="0.01" min="0" class="w-full p-2 border border-slate-300 rounded text-slate-700 font-mono text-sm">
+                    </div>
+                </div>
+                <div class="text-xs font-mono text-slate-600 space-y-1">
+                    <div>Unrolled width = π×d: <strong id="unrolled-width">—</strong></div>
+                    <div>Unrolled height: <strong id="unrolled-height">—</strong></div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" id="cyl-unit-in" class="flex-1 py-1.5 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">in</button>
+                    <button type="button" id="cyl-unit-cm" class="flex-1 py-1.5 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">cm</button>
+                    <button type="button" id="cyl-unit-mm" class="flex-1 py-1.5 text-xs font-medium rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">mm</button>
+                </div>
+                <button type="button" id="apply-cyl-to-canvas" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition">
+                    <i class="fa-solid fa-arrow-right-to-bracket mr-2"></i> Apply to canvas
+                </button>
+            </div>
             
             <div class="pt-4">
                 <button id="clear-canvas-btn" class="w-full py-2 border border-red-200 text-red-500 rounded hover:bg-red-50 transition text-sm font-medium">
@@ -208,28 +281,62 @@
                     <button id="zoom-in" class="px-3 py-1.5 hover:bg-slate-200 text-slate-600 border-l border-slate-200"><i class="fa-solid fa-plus"></i></button>
                 </div>
                 
-                <div class="flex gap-4 text-xs text-slate-500 items-center hidden sm:flex">
-                    <span><i class="fa-solid fa-mouse"></i> Paint</span>
-                    <span><i class="fa-regular fa-circle-dot"></i> Ctrl+Wheel Zoom</span>
-                    <span><i class="fa-solid fa-up-down-left-right"></i> Middle-Click Pan</span>
+                <!-- Drawing tools -->
+                <div class="flex items-center gap-1 border border-slate-200 rounded bg-slate-50 p-0.5">
+                    <button type="button" class="tool-btn active" data-tool="paint" title="Paint"><i class="fa-solid fa-paintbrush"></i></button>
+                    <button type="button" class="tool-btn" data-tool="line" title="Line"><i class="fa-solid fa-minus"></i></button>
+                    <button type="button" class="tool-btn" data-tool="circle" title="Circle"><i class="fa-regular fa-circle"></i></button>
+                    <button type="button" class="tool-btn" data-tool="square" title="Square"><i class="fa-solid fa-square"></i></button>
+                    <button type="button" class="tool-btn" data-tool="fill" title="Fill"><i class="fa-solid fa-fill-drip"></i></button>
+                    <button type="button" class="tool-btn" data-tool="eraser" title="Eraser"><i class="fa-solid fa-eraser"></i></button>
+                    <button type="button" class="tool-btn" data-tool="eyedropper" title="Eyedropper"><i class="fa-solid fa-eyedropper"></i></button>
+                </div>
+                <div id="brush-width-wrap" class="hidden items-center gap-2">
+                    <label id="brush-width-label" class="text-xs text-slate-500 whitespace-nowrap">Brush width:</label>
+                    <input type="range" id="brush-width-slider" min="1" max="50" value="1" class="w-24">
+                    <input type="number" id="brush-width-input" min="1" max="50" value="1" class="w-12 text-xs font-mono text-slate-600 border border-slate-200 rounded px-1 py-0.5 text-right">
                 </div>
             </div>
 
             <div class="flex gap-2">
+                <button type="button" id="save-pattern-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded text-sm font-medium transition flex items-center gap-1.5" title="Save pattern">
+                    <i class="fa-solid fa-floppy-disk"></i> Save
+                </button>
+                <button type="button" id="load-pattern-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded text-sm font-medium transition flex items-center gap-1.5" title="Load pattern">
+                    <i class="fa-solid fa-folder-open"></i> Load
+                </button>
+                <button type="button" id="undo-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded text-sm font-medium transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed" title="Undo (max 3)">
+                    <i class="fa-solid fa-rotate-left"></i> Undo
+                </button>
+                <button type="button" id="redo-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded text-sm font-medium transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed" title="Redo (max 3)">
+                    <i class="fa-solid fa-rotate-right"></i> Redo
+                </button>
                 <button id="print-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium transition flex items-center gap-2">
                     <i class="fa-solid fa-print"></i> Print
                 </button>
-                 <button id="download-svg-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium transition flex items-center gap-2" title="Download SVG Vector File">
-                    <i class="fa-solid fa-vector-square"></i> SVG
-                </button>
-                <button id="download-btn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm font-medium transition shadow-sm flex items-center gap-2">
-                    <i class="fa-solid fa-image"></i> PNG
-                </button>
+                <div class="relative" id="exports-wrap">
+                    <button type="button" id="exports-toggle-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded text-sm font-medium transition flex items-center gap-1.5" title="Exports">
+                        <i class="fa-solid fa-image"></i> Exports
+                    </button>
+                    <div id="exports-dropdown" class="hidden absolute top-full left-0 mt-1 py-1 bg-white rounded-lg shadow-lg border border-slate-200 z-50 min-w-[140px]">
+                        <button type="button" id="download-svg-btn" class="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 rounded-none first:rounded-t-lg" title="Download SVG Vector File">
+                            <i class="fa-solid fa-vector-square"></i> SVG
+                        </button>
+                        <button type="button" id="download-btn" class="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2 rounded-none last:rounded-b-lg" title="Download PNG">
+                            <i class="fa-solid fa-image"></i> PNG
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Viewport -->
         <div class="flex-1 overflow-auto bg-slate-100 relative p-12 canvas-container cursor-grab" id="scroll-container">
+            <!-- Navigation instructions overlay (bottom-right of canvas viewport) -->
+            <div id="nav-instructions-overlay" class="absolute bottom-4 right-4 flex gap-4 text-xs text-slate-500 items-center pointer-events-none bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+                <span><i class="fa-regular fa-circle-dot"></i> Ctrl+Wheel Zoom</span>
+                <span><i class="fa-solid fa-up-down-left-right"></i> Middle-Click Pan</span>
+            </div>
             
             <!-- Canvas Wrapper (Scalable) -->
             <div class="relative transition-transform duration-75 origin-top-left" id="canvas-scaler" style="margin-top: 30px; margin-left: 30px;">
@@ -267,6 +374,10 @@
                     <svg id="grid-svg" xmlns="http://www.w3.org/2000/svg" style="overflow: visible; display: block; cursor: crosshair;">
                         <!-- Content injected by JS -->
                     </svg>
+                    <!-- Preview overlay (same size as grid-svg, for line/circle/square preview) -->
+                    <svg id="preview-svg" xmlns="http://www.w3.org/2000/svg" class="absolute top-0 left-0 pointer-events-none" style="overflow: visible; display: none; width: 100%; height: 100%;">
+                        <!-- Preview shapes drawn by JS -->
+                    </svg>
                     
                     <!-- Border Overlay (optional UI polish) -->
                     <div id="canvas-ui-border" class="absolute top-0 left-0 w-full h-full border border-slate-200 pointer-events-none"></div>
@@ -274,6 +385,30 @@
             </div>
         </div>
     </main>
+
+    <!-- Save/Load modal -->
+    <div id="save-load-modal" class="modal-overlay" aria-hidden="true">
+        <div class="modal-panel p-5" role="dialog" aria-labelledby="modal-title">
+            <h2 id="modal-title" class="mb-4">Save pattern</h2>
+            <!-- Save mode -->
+            <div id="save-load-save-section" class="space-y-3">
+                <label class="block text-sm font-medium text-slate-600">Pattern name</label>
+                <input type="text" id="save-pattern-name" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="My pattern" maxlength="100">
+                <div class="flex gap-2 justify-end pt-2">
+                    <button type="button" id="modal-cancel-btn" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium">Cancel</button>
+                    <button type="button" id="modal-save-btn" class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 text-sm font-medium">Save</button>
+                </div>
+            </div>
+            <!-- Load mode -->
+            <div id="save-load-load-section" class="hidden">
+                <p id="save-load-empty" class="text-sm text-slate-500 py-4 hidden">No saved patterns.</p>
+                <ul id="save-load-list" class="save-load-list space-y-2"></ul>
+                <div class="flex justify-end pt-3">
+                    <button type="button" id="modal-close-load-btn" class="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Hidden Print Area handled by CSS -->
 
@@ -288,12 +423,21 @@
             dotSizeMm: 3.0,
             zoom: 1.0,
             cells: {}, // key: "row,col", value: hex
+            tool: 'paint',
+            brushWidth: 1,
+            eraserWidth: 1,
+            undoStack: [],
+            redoStack: [],
+            cylinderUnit: 'in',
+            cylinderHeight: 3,
+            cylinderDiameter: 1.5,
             
             // Runtime calc
             rows: 0,
             cols: 0,
             wMm: 0,
-            hMm: 0
+            hMm: 0,
+            gridGeom: null
         };
 
         const DOM = {
@@ -326,26 +470,288 @@
             clearPaletteBtn: document.getElementById('clear-palette'),
             
             // Actions
+            savePatternBtn: document.getElementById('save-pattern-btn'),
+            loadPatternBtn: document.getElementById('load-pattern-btn'),
+            undoBtn: document.getElementById('undo-btn'),
+            redoBtn: document.getElementById('redo-btn'),
             clearCanvasBtn: document.getElementById('clear-canvas-btn'),
+            // Save/Load modal
+            saveLoadModal: document.getElementById('save-load-modal'),
+            modalTitle: document.getElementById('modal-title'),
+            savePatternName: document.getElementById('save-pattern-name'),
+            modalCancelBtn: document.getElementById('modal-cancel-btn'),
+            modalSaveBtn: document.getElementById('modal-save-btn'),
+            saveLoadSaveSection: document.getElementById('save-load-save-section'),
+            saveLoadLoadSection: document.getElementById('save-load-load-section'),
+            saveLoadEmpty: document.getElementById('save-load-empty'),
+            saveLoadList: document.getElementById('save-load-list'),
+            modalCloseLoadBtn: document.getElementById('modal-close-load-btn'),
             downloadBtn: document.getElementById('download-btn'),
             downloadSvgBtn: document.getElementById('download-svg-btn'),
+            exportsWrap: document.getElementById('exports-wrap'),
+            exportsToggleBtn: document.getElementById('exports-toggle-btn'),
+            exportsDropdown: document.getElementById('exports-dropdown'),
             printBtn: document.getElementById('print-btn'),
             
             // Zoom
             zoomInBtn: document.getElementById('zoom-in'),
             zoomOutBtn: document.getElementById('zoom-out'),
-            zoomLabel: document.getElementById('zoom-level')
+            zoomLabel: document.getElementById('zoom-level'),
+            
+            // Tools
+            toolBtns: document.querySelectorAll('.tool-btn'),
+            brushWidthWrap: document.getElementById('brush-width-wrap'),
+            brushWidthLabel: document.getElementById('brush-width-label'),
+            brushWidthSlider: document.getElementById('brush-width-slider'),
+            brushWidthInput: document.getElementById('brush-width-input'),
+            previewSvg: document.getElementById('preview-svg'),
+            
+            // Cylinder
+            cylHeight: document.getElementById('cyl-height'),
+            cylDiameter: document.getElementById('cyl-diameter'),
+            unrolledWidthEl: document.getElementById('unrolled-width'),
+            unrolledHeightEl: document.getElementById('unrolled-height'),
+            applyCylToCanvas: document.getElementById('apply-cyl-to-canvas'),
+            cylUnitBtns: [document.getElementById('cyl-unit-in'), document.getElementById('cyl-unit-cm'), document.getElementById('cyl-unit-mm')]
         };
 
         function init() {
             renderPalette();
             setupColorPicker();
             setupGridInputs();
+            setupToolbar();
+            setupCylinderCalculator();
             setupSVGInteraction();
+            setupSaveLoad();
             setupZoom();
             setupPan();
             
             updateDimensions();
+        }
+
+        /** Get SVG point in mm from mouse event (relative to grid-svg) */
+        function svgPointFromEvent(e) {
+            const svg = DOM.svg;
+            const pt = svg.createSVGPoint();
+            pt.x = e.clientX;
+            pt.y = e.clientY;
+            const mat = svg.getScreenCTM().inverse();
+            const t = pt.matrixTransform(mat);
+            return { x: t.x, y: t.y };
+        }
+
+        /** Get cell key "row,col" at mm point (nearest cell center), or null */
+        function getCellKeyAtPoint(xMm, yMm) {
+            const g = state.gridGeom;
+            if (!g || state.rows === 0 || state.cols === 0) return null;
+            const { r, xS, yS } = g;
+            let bestKey = null;
+            let bestDist = Infinity;
+            for (let row = 0; row < state.rows; row++) {
+                const rowOffset = (row % 2 !== 0) ? r : 0;
+                for (let col = 0; col < state.cols; col++) {
+                    const cx = (col * xS) + r + rowOffset;
+                    const cy = (row * yS) + r;
+                    const dx = xMm - cx, dy = yMm - cy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestKey = `${row},${col}`;
+                    }
+                }
+            }
+            if (bestDist > r * 1.5) return null;
+            return bestKey;
+        }
+
+        /** All cell centers as { key, cx, cy } */
+        function getAllCellCenters() {
+            const g = state.gridGeom;
+            if (!g) return [];
+            const { r, xS, yS } = g;
+            const out = [];
+            for (let row = 0; row < state.rows; row++) {
+                const rowOffset = (row % 2 !== 0) ? r : 0;
+                for (let col = 0; col < state.cols; col++) {
+                    const cx = (col * xS) + r + rowOffset;
+                    const cy = (row * yS) + r;
+                    out.push({ key: `${row},${col}`, cx, cy });
+                }
+            }
+            return out;
+        }
+
+        function distPointToSegment(px, py, x1, y1, x2, y2) {
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1e-9;
+            const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (len * len)));
+            const projX = x1 + t * dx, projY = y1 + t * dy;
+            return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+        }
+
+        function getCellsInLine(x1, y1, x2, y2) {
+            const g = state.gridGeom;
+            if (!g) return [];
+            const { r } = g;
+            const threshold = r * 0.9;
+            const cells = [];
+            getAllCellCenters().forEach(({ key, cx, cy }) => {
+                if (distPointToSegment(cx, cy, x1, y1, x2, y2) <= threshold) cells.push(key);
+            });
+            return cells;
+        }
+
+        function getCellsInCircle(cx, cy, radiusMm) {
+            const centers = getAllCellCenters();
+            const cells = [];
+            centers.forEach(({ key, cx: ccx, cy: ccy }) => {
+                const d = Math.sqrt((cx - ccx) ** 2 + (cy - ccy) ** 2);
+                if (d <= radiusMm) cells.push(key);
+            });
+            return cells;
+        }
+
+        function getCellsInRect(x1, y1, x2, y2) {
+            const xMin = Math.min(x1, x2), xMax = Math.max(x1, x2);
+            const yMin = Math.min(y1, y2), yMax = Math.max(y1, y2);
+            const cells = [];
+            getAllCellCenters().forEach(({ key, cx, cy }) => {
+                if (cx >= xMin && cx <= xMax && cy >= yMin && cy <= yMax) cells.push(key);
+            });
+            return cells;
+        }
+
+        function setupToolbar() {
+            DOM.toolBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tool = btn.dataset.tool;
+                    state.tool = tool;
+                    DOM.toolBtns.forEach(b => {
+                        b.classList.toggle('active', b.dataset.tool === tool);
+                    });
+                    const showWidth = tool === 'paint' || tool === 'eraser';
+                    DOM.brushWidthWrap.classList.toggle('hidden', !showWidth);
+                    DOM.brushWidthWrap.classList.toggle('flex', showWidth);
+                    DOM.brushWidthLabel.textContent = tool === 'eraser' ? 'Eraser width:' : 'Brush width:';
+                    if (tool === 'paint') {
+                        DOM.brushWidthSlider.value = state.brushWidth;
+                        DOM.brushWidthInput.value = state.brushWidth;
+                    } else if (tool === 'eraser') {
+                        DOM.brushWidthSlider.value = state.eraserWidth;
+                        DOM.brushWidthInput.value = state.eraserWidth;
+                    }
+                });
+            });
+            function setBrushWidth(val) {
+                val = Math.max(1, Math.min(50, val));
+                if (state.tool === 'eraser') {
+                    state.eraserWidth = val;
+                } else {
+                    state.brushWidth = val;
+                }
+                DOM.brushWidthSlider.value = val;
+                DOM.brushWidthInput.value = val;
+            }
+            DOM.brushWidthSlider.addEventListener('input', () => {
+                setBrushWidth(parseInt(DOM.brushWidthSlider.value, 10) || 1);
+            });
+            DOM.brushWidthInput.addEventListener('input', () => {
+                setBrushWidth(parseInt(DOM.brushWidthInput.value, 10) || 1);
+            });
+            DOM.brushWidthInput.value = state.brushWidth;
+            const showWidth = state.tool === 'paint' || state.tool === 'eraser';
+            DOM.brushWidthWrap.classList.toggle('hidden', !showWidth);
+            DOM.brushWidthWrap.classList.toggle('flex', showWidth);
+            DOM.brushWidthLabel.textContent = state.tool === 'eraser' ? 'Eraser width:' : 'Brush width:';
+        }
+
+        function setupCylinderCalculator() {
+            function cylUnitToMm(val) {
+                if (state.cylinderUnit === 'in') return val * 25.4;
+                if (state.cylinderUnit === 'cm') return val * 10;
+                return val;
+            }
+            function mmToCylUnit(mm) {
+                if (state.cylinderUnit === 'in') return mm / 25.4;
+                if (state.cylinderUnit === 'cm') return mm / 10;
+                return mm;
+            }
+            function updateUnrolled() {
+                const h = parseFloat(DOM.cylHeight.value) || 0;
+                const d = parseFloat(DOM.cylDiameter.value) || 0;
+                state.cylinderHeight = h;
+                state.cylinderDiameter = d;
+                const hMm = cylUnitToMm(h), dMm = cylUnitToMm(d);
+                const widthMm = Math.PI * dMm;
+                DOM.unrolledWidthEl.textContent = mmToCylUnit(widthMm).toFixed(3) + ' ' + state.cylinderUnit;
+                DOM.unrolledHeightEl.textContent = h.toFixed(3) + ' ' + state.cylinderUnit;
+            }
+            DOM.cylHeight.addEventListener('input', updateUnrolled);
+            DOM.cylDiameter.addEventListener('input', updateUnrolled);
+            DOM.cylUnitBtns.forEach((btn, i) => {
+                const u = ['in', 'cm', 'mm'][i];
+                btn.addEventListener('click', () => {
+                    state.cylinderUnit = u;
+                    DOM.cylUnitBtns.forEach((b, j) => {
+                        b.classList.toggle('bg-blue-100', j === i);
+                        b.classList.toggle('border-blue-400', j === i);
+                    });
+                    updateUnrolled();
+                });
+            });
+            DOM.cylUnitBtns[0].classList.add('bg-blue-100', 'border-blue-400');
+            DOM.applyCylToCanvas.addEventListener('click', () => {
+                const h = parseFloat(DOM.cylHeight.value) || 0;
+                const d = parseFloat(DOM.cylDiameter.value) || 0;
+                const hMm = cylUnitToMm(h), dMm = cylUnitToMm(d);
+                const widthMm = Math.PI * dMm;
+                if (state.unit === 'in') {
+                    state.width = widthMm / 25.4;
+                    state.height = hMm / 25.4;
+                } else if (state.unit === 'cm') {
+                    state.width = widthMm / 10;
+                    state.height = hMm / 10;
+                } else {
+                    state.width = widthMm;
+                    state.height = hMm;
+                }
+                DOM.wInput.value = parseFloat(state.width.toFixed(4));
+                DOM.hInput.value = parseFloat(state.height.toFixed(4));
+                updateDimensions();
+            });
+            updateUnrolled();
+        }
+
+        const MAX_UNDO_REDO = 3;
+
+        function pushUndo() {
+            state.redoStack = [];
+            state.undoStack.push({ ...state.cells });
+            if (state.undoStack.length > MAX_UNDO_REDO) state.undoStack.shift();
+            updateUndoRedoButtons();
+        }
+
+        function undo() {
+            if (state.undoStack.length === 0) return;
+            state.redoStack.push({ ...state.cells });
+            if (state.redoStack.length > MAX_UNDO_REDO) state.redoStack.shift();
+            state.cells = state.undoStack.pop();
+            updateDimensions();
+            updateUndoRedoButtons();
+        }
+
+        function redo() {
+            if (state.redoStack.length === 0) return;
+            state.undoStack.push({ ...state.cells });
+            if (state.undoStack.length > MAX_UNDO_REDO) state.undoStack.shift();
+            state.cells = state.redoStack.pop();
+            updateDimensions();
+            updateUndoRedoButtons();
+        }
+
+        function updateUndoRedoButtons() {
+            DOM.undoBtn.disabled = state.undoStack.length === 0;
+            DOM.redoBtn.disabled = state.redoStack.length === 0;
         }
 
         /**
@@ -403,10 +809,16 @@
             DOM.svg.setAttribute('width', `${wMm * cssScale}px`);
             DOM.svg.setAttribute('height', `${hMm * cssScale}px`);
 
+            state.gridGeom = { d: diameterMm, r: radiusMm, xS: xSpacingMm, yS: ySpacingMm };
             renderSVGContent(diameterMm, radiusMm, xSpacingMm, ySpacingMm);
             
             // Update row markers
             renderRowNumbers(state.rows, ySpacingMm * cssScale, radiusMm * cssScale);
+            
+            // Keep preview SVG in sync
+            DOM.previewSvg.setAttribute('viewBox', `0 0 ${wMm} ${hMm}`);
+            DOM.previewSvg.setAttribute('width', `${wMm * cssScale}px`);
+            DOM.previewSvg.setAttribute('height', `${hMm * cssScale}px`);
         }
 
         function renderSVGContent(d, r, xS, yS) {
@@ -462,69 +874,239 @@
             }
         }
 
+        /** All cell keys within brush width (square in row,col) centered on key */
+        function getKeysInBrush(key, width) {
+            const [row, col] = key.split(',').map(Number);
+            const rad = Math.floor((width - 1) / 2);
+            const keys = [];
+            for (let r = row - rad; r <= row + rad; r++) {
+                for (let c = col - rad; c <= col + rad; c++) {
+                    if (r >= 0 && r < state.rows && c >= 0 && c < state.cols)
+                        keys.push(`${r},${c}`);
+                }
+            }
+            return keys;
+        }
+
+        /** Neighbors for honeycomb grid (row,col) */
+        function getNeighbors(row, col) {
+            const out = [];
+            const even = row % 2 === 0;
+            const offsets = even
+                ? [[-1,-1],[-1,0],[0,-1],[0,1],[1,-1],[1,0]]
+                : [[-1,0],[-1,1],[0,-1],[0,1],[1,0],[1,1]];
+            offsets.forEach(([dr, dc]) => {
+                const r = row + dr, c = col + dc;
+                if (r >= 0 && r < state.rows && c >= 0 && c < state.cols) out.push(`${r},${c}`);
+            });
+            return out;
+        }
+
+        /** Flood fill from key, replace replaceColor with state.hex (entire connected region). */
+        function floodFill(startKey) {
+            pushUndo();
+            const replaceColor = (state.cells[startKey] === undefined) ? '#f8fafc' : state.cells[startKey];
+            const fillColor = state.hex;
+            if (replaceColor === fillColor) return;
+            const filled = new Set();
+            const queue = [startKey];
+            filled.add(startKey);
+            while (queue.length) {
+                const key = queue.shift();
+                const [row, col] = key.split(',').map(Number);
+                getNeighbors(row, col).forEach(nkey => {
+                    if (filled.has(nkey)) return;
+                    const cellColor = state.cells[nkey] === undefined ? '#f8fafc' : state.cells[nkey];
+                    if (cellColor !== replaceColor) return;
+                    filled.add(nkey);
+                    queue.push(nkey);
+                });
+            }
+            filled.forEach(key => {
+                state.cells[key] = fillColor;
+            });
+            updateDimensions();
+        }
+
         /**
          * INTERACTION (SVG)
          */
         function setupSVGInteraction() {
             let isPainting = false;
             let isErasing = false;
+            let drawStart = null;
 
             function paintCell(target) {
                 if (target.tagName === 'circle') {
                     const key = target.dataset.key;
                     if (!key) return;
-                    
-                    if (isErasing) {
-                        delete state.cells[key];
-                        target.setAttribute('fill', '#f8fafc');
-                        target.setAttribute('stroke', '#cbd5e1');
-                    } else {
-                        state.cells[key] = state.hex;
-                        target.setAttribute('fill', state.hex);
-                        target.setAttribute('stroke', 'rgba(0,0,0,0.1)');
-                    }
+                    const isEraserTool = state.tool === 'eraser';
+                    const isErasingMode = isEraserTool || isErasing;
+                    const width = isEraserTool ? state.eraserWidth : state.brushWidth;
+                    const keys = (state.tool === 'paint' || state.tool === 'eraser') && width >= 1
+                        ? getKeysInBrush(key, width)
+                        : [key];
+                    keys.forEach(k => {
+                        const el = k === key ? target : DOM.svg.querySelector(`circle[data-key="${k}"]`);
+                        if (!el) return;
+                        if (isErasingMode) {
+                            delete state.cells[k];
+                            el.setAttribute('fill', '#f8fafc');
+                            el.setAttribute('stroke', '#cbd5e1');
+                        } else {
+                            state.cells[k] = state.hex;
+                            el.setAttribute('fill', state.hex);
+                            el.setAttribute('stroke', 'rgba(0,0,0,0.1)');
+                        }
+                    });
+                    if (keys.length > 1) updateDimensions();
+                }
+            }
+
+            function applyCellsToState(keys) {
+                keys.forEach(key => {
+                    state.cells[key] = state.hex;
+                });
+                updateDimensions();
+            }
+
+            function clearPreview() {
+                DOM.previewSvg.innerHTML = '';
+                DOM.previewSvg.style.display = 'none';
+            }
+
+            function updatePreviewShape(tool, x1, y1, x2, y2) {
+                DOM.previewSvg.innerHTML = '';
+                DOM.previewSvg.style.display = 'block';
+                const vb = DOM.previewSvg.getAttribute('viewBox');
+                if (!vb) return;
+                const stroke = state.hex;
+                const strokeWidth = Math.max(0.3, state.gridGeom ? state.gridGeom.d * 0.15 : 0.5);
+                if (tool === 'line') {
+                    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                    line.setAttribute('x1', x1); line.setAttribute('y1', y1);
+                    line.setAttribute('x2', x2); line.setAttribute('y2', y2);
+                    line.setAttribute('stroke', stroke);
+                    line.setAttribute('stroke-width', strokeWidth);
+                    line.setAttribute('stroke-linecap', 'round');
+                    DOM.previewSvg.appendChild(line);
+                } else if (tool === 'circle') {
+                    const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2;
+                    const r = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) / 2;
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', cx); circle.setAttribute('cy', cy);
+                    circle.setAttribute('r', Math.max(0.1, r));
+                    circle.setAttribute('fill', 'none');
+                    circle.setAttribute('stroke', stroke);
+                    circle.setAttribute('stroke-width', strokeWidth);
+                    DOM.previewSvg.appendChild(circle);
+                } else if (tool === 'square') {
+                    const x = Math.min(x1, x2), y = Math.min(y1, y2);
+                    const w = Math.abs(x2 - x1), h = Math.abs(y2 - y1);
+                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                    rect.setAttribute('x', x); rect.setAttribute('y', y);
+                    rect.setAttribute('width', w); rect.setAttribute('height', h);
+                    rect.setAttribute('fill', 'none');
+                    rect.setAttribute('stroke', stroke);
+                    rect.setAttribute('stroke-width', strokeWidth);
+                    DOM.previewSvg.appendChild(rect);
                 }
             }
 
             DOM.svg.addEventListener('mousedown', (e) => {
-                if (e.button === 0 || e.button === 2) {
-                    isPainting = true;
-                    isErasing = (e.button === 2);
-                    paintCell(e.target);
+                if (e.button !== 0 && e.button !== 2) return;
+                const pt = svgPointFromEvent(e);
+                if (state.tool === 'fill') {
+                    const key = getCellKeyAtPoint(pt.x, pt.y);
+                    if (key) floodFill(key);
+                    return;
+                }
+                if (state.tool === 'eyedropper' && e.target.tagName === 'circle') {
+                    const key = e.target.dataset.key;
+                    if (key) {
+                        const hex = state.cells[key] !== undefined ? state.cells[key] : '#f8fafc';
+                        if (typeof window.setColorFromHex === 'function') window.setColorFromHex(hex);
+                    }
+                    return;
+                }
+                if (state.tool === 'line' || state.tool === 'circle' || state.tool === 'square') {
+                    drawStart = { x: pt.x, y: pt.y };
+                    updatePreviewShape(state.tool, pt.x, pt.y, pt.x, pt.y);
+                    return;
+                }
+                isPainting = true;
+                isErasing = (e.button === 2);
+                if (state.tool === 'paint' || state.tool === 'eraser') pushUndo();
+                paintCell(e.target);
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (drawStart && (state.tool === 'line' || state.tool === 'circle' || state.tool === 'square')) {
+                    const pt = svgPointFromEvent(e);
+                    updatePreviewShape(state.tool, drawStart.x, drawStart.y, pt.x, pt.y);
                 }
             });
 
-            window.addEventListener('mouseup', () => {
+            window.addEventListener('mouseup', (e) => {
+                if (e.button !== 0) return;
+                if (drawStart && (state.tool === 'line' || state.tool === 'circle' || state.tool === 'square')) {
+                    const pt = svgPointFromEvent(e);
+                    let keys = [];
+                    if (state.tool === 'line') keys = getCellsInLine(drawStart.x, drawStart.y, pt.x, pt.y);
+                    else if (state.tool === 'circle') {
+                        const cx = (drawStart.x + pt.x) / 2, cy = (drawStart.y + pt.y) / 2;
+                        const r = Math.sqrt((pt.x - drawStart.x) ** 2 + (pt.y - drawStart.y) ** 2) / 2;
+                        keys = getCellsInCircle(cx, cy, r);
+                    } else keys = getCellsInRect(drawStart.x, drawStart.y, pt.x, pt.y);
+                    pushUndo();
+                    applyCellsToState(keys);
+                    clearPreview();
+                    drawStart = null;
+                }
                 isPainting = false;
                 isErasing = false;
             });
 
+            DOM.svg.addEventListener('mouseleave', () => {
+                if (drawStart) {
+                    clearPreview();
+                    drawStart = null;
+                }
+            });
+
             DOM.svg.addEventListener('mouseover', (e) => {
-                if (isPainting) {
+                if (isPainting && (state.tool === 'paint' || state.tool === 'eraser')) {
                     paintCell(e.target);
                 }
             });
             
-            // Prevent context menu on right click
             DOM.svg.addEventListener('contextmenu', e => e.preventDefault());
             
-            // Touch
-            // SVG touch is tricky because 'elementFromPoint' is needed to find target under finger
             function handleTouch(e) {
                 e.preventDefault();
                 const touch = e.touches[0];
                 const target = document.elementFromPoint(touch.clientX, touch.clientY);
                 if (target && target.tagName === 'circle' && DOM.svg.contains(target)) {
-                     // Need to re-set mode based on initial touch? 
-                     // Mobile usually doesn't have right click. Assume paint.
-                     // We set isPainting=true in touchstart
-                     paintCell(target);
+                    if (state.tool === 'eyedropper') {
+                        const key = target.dataset.key;
+                        if (key) {
+                            const hex = state.cells[key] !== undefined ? state.cells[key] : '#f8fafc';
+                            if (typeof window.setColorFromHex === 'function') window.setColorFromHex(hex);
+                        }
+                        return;
+                    }
+                    paintCell(target);
                 }
             }
             
             DOM.svg.addEventListener('touchstart', (e) => {
+                if (state.tool === 'eyedropper') {
+                    handleTouch(e);
+                    return;
+                }
                 isPainting = true;
                 isErasing = false;
+                if (state.tool === 'paint' || state.tool === 'eraser') pushUndo();
                 handleTouch(e);
             }, {passive: false});
             
@@ -537,8 +1119,18 @@
          * EXPORT
          */
         function setupExport() {
-             // 1. SVG Export (Vector)
-             DOM.downloadSvgBtn.addEventListener('click', () => {
+            // Exports dropdown: toggle on button, close on outside click
+            DOM.exportsToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                DOM.exportsDropdown.classList.toggle('hidden');
+            });
+            document.addEventListener('click', (e) => {
+                if (!DOM.exportsWrap.contains(e.target)) DOM.exportsDropdown.classList.add('hidden');
+            });
+
+            // 1. SVG Export (Vector)
+            DOM.downloadSvgBtn.addEventListener('click', () => {
+                DOM.exportsDropdown.classList.add('hidden');
                 const svgData = DOM.svg.outerHTML;
                 const blob = new Blob([svgData], {type: 'image/svg+xml'});
                 const url = URL.createObjectURL(blob);
@@ -550,6 +1142,7 @@
 
             // 2. PNG Export (High Res)
             DOM.downloadBtn.addEventListener('click', () => {
+                DOM.exportsDropdown.classList.add('hidden');
                 const svgData = new XMLSerializer().serializeToString(DOM.svg);
                 const img = new Image();
                 const scale = 3; // 3x resolution
@@ -587,6 +1180,213 @@
             });
         }
 
+
+        /**
+         * Save/Load patterns (IndexedDB + modal)
+         */
+        const DB_NAME = 'beadpattern-db';
+        const STORE_NAME = 'patterns';
+
+        function openDB() {
+            return new Promise((resolve, reject) => {
+                const req = indexedDB.open(DB_NAME, 1);
+                req.onerror = () => reject(req.error);
+                req.onsuccess = () => resolve(req.result);
+                req.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains(STORE_NAME)) {
+                        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                        store.createIndex('createdAt', 'createdAt', { unique: false });
+                    }
+                };
+            });
+        }
+
+        function savePatternToDB(name) {
+            const trimmed = (name || '').trim() || 'Untitled pattern';
+            const record = {
+                id: Date.now(),
+                name: trimmed,
+                width: state.width,
+                height: state.height,
+                unit: state.unit,
+                dotSizeMm: state.dotSizeMm,
+                cells: { ...state.cells },
+                createdAt: Date.now()
+            };
+            return openDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readwrite');
+                    tx.objectStore(STORE_NAME).put(record);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                });
+            });
+        }
+
+        function getAllPatterns() {
+            return openDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readonly');
+                    const req = tx.objectStore(STORE_NAME).getAll();
+                    req.onsuccess = () => resolve((req.result || []).sort((a, b) => (b.createdAt || b.id) - (a.createdAt || a.id)));
+                    req.onerror = () => reject(req.error);
+                });
+            });
+        }
+
+        function getPattern(id) {
+            return openDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readonly');
+                    const req = tx.objectStore(STORE_NAME).get(id);
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => reject(req.error);
+                });
+            });
+        }
+
+        function updatePatternName(id, newName) {
+            const trimmed = (newName || '').trim();
+            if (!trimmed) return Promise.resolve();
+            return getPattern(id).then(p => {
+                if (!p) return;
+                p.name = trimmed;
+                return openDB().then(db => {
+                    return new Promise((resolve, reject) => {
+                        const tx = db.transaction(STORE_NAME, 'readwrite');
+                        tx.objectStore(STORE_NAME).put(p);
+                        tx.oncomplete = () => resolve();
+                        tx.onerror = () => reject(tx.error);
+                    });
+                });
+            });
+        }
+
+        function deletePattern(id) {
+            return openDB().then(db => {
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(STORE_NAME, 'readwrite');
+                    tx.objectStore(STORE_NAME).delete(id);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => reject(tx.error);
+                });
+            });
+        }
+
+        function openSaveModal() {
+            DOM.modalTitle.textContent = 'Save pattern';
+            DOM.saveLoadSaveSection.classList.remove('hidden');
+            DOM.saveLoadLoadSection.classList.add('hidden');
+            DOM.savePatternName.value = '';
+            DOM.savePatternName.placeholder = 'My pattern';
+            DOM.saveLoadModal.classList.add('open');
+            DOM.saveLoadModal.setAttribute('aria-hidden', 'false');
+            setTimeout(() => DOM.savePatternName.focus(), 100);
+        }
+
+        function openLoadModal() {
+            DOM.modalTitle.textContent = 'Load pattern';
+            DOM.saveLoadSaveSection.classList.add('hidden');
+            DOM.saveLoadLoadSection.classList.remove('hidden');
+            DOM.saveLoadModal.classList.add('open');
+            DOM.saveLoadModal.setAttribute('aria-hidden', 'false');
+            renderLoadList();
+        }
+
+        function closeSaveLoadModal() {
+            DOM.saveLoadModal.classList.remove('open');
+            DOM.saveLoadModal.setAttribute('aria-hidden', 'true');
+        }
+
+        function renderLoadList() {
+            DOM.saveLoadList.innerHTML = '';
+            getAllPatterns().then(list => {
+                if (list.length === 0) {
+                    DOM.saveLoadEmpty.classList.remove('hidden');
+                    return;
+                }
+                DOM.saveLoadEmpty.classList.add('hidden');
+                list.forEach(p => {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center gap-2 py-2 px-3 rounded-lg border border-slate-100 hover:bg-slate-50';
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'flex-1 text-sm text-slate-700 truncate min-w-0';
+                    nameSpan.textContent = p.name;
+                    const renameBtn = document.createElement('button');
+                    renameBtn.type = 'button';
+                    renameBtn.className = 'px-2 py-1 text-xs rounded border border-slate-200 text-slate-600 hover:bg-slate-100 shrink-0';
+                    renameBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+                    renameBtn.title = 'Rename';
+                    renameBtn.addEventListener('click', () => {
+                        const newName = prompt('Rename pattern:', p.name);
+                        if (newName != null && newName.trim()) {
+                            updatePatternName(p.id, newName.trim()).then(() => renderLoadList());
+                        }
+                    });
+                    const loadBtn = document.createElement('button');
+                    loadBtn.type = 'button';
+                    loadBtn.className = 'px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 shrink-0';
+                    loadBtn.textContent = 'Load';
+                    loadBtn.addEventListener('click', () => {
+                        getPattern(p.id).then(rec => {
+                            if (!rec) return;
+                            state.width = rec.width;
+                            state.height = rec.height;
+                            state.unit = rec.unit;
+                            state.dotSizeMm = rec.dotSizeMm != null ? rec.dotSizeMm : 3;
+                            state.cells = rec.cells ? { ...rec.cells } : {};
+                            state.undoStack = [];
+                            state.redoStack = [];
+                            DOM.wInput.value = parseFloat(state.width.toFixed(2));
+                            DOM.hInput.value = parseFloat(state.height.toFixed(2));
+                            DOM.dInput.value = state.dotSizeMm;
+                            updateDimensions();
+                            updateUndoRedoButtons();
+                            closeSaveLoadModal();
+                        });
+                    });
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'px-2 py-1 text-xs rounded border border-red-200 text-red-600 hover:bg-red-50 shrink-0';
+                    delBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+                    delBtn.title = 'Delete';
+                    delBtn.addEventListener('click', () => {
+                        if (confirm('Delete this pattern?')) {
+                            deletePattern(p.id).then(() => renderLoadList());
+                        }
+                    });
+                    li.appendChild(nameSpan);
+                    li.appendChild(renameBtn);
+                    li.appendChild(loadBtn);
+                    li.appendChild(delBtn);
+                    DOM.saveLoadList.appendChild(li);
+                });
+            }).catch(() => {
+                DOM.saveLoadEmpty.classList.remove('hidden');
+                DOM.saveLoadEmpty.textContent = 'Could not load patterns.';
+            });
+        }
+
+        function setupSaveLoad() {
+            DOM.savePatternBtn.addEventListener('click', openSaveModal);
+            DOM.loadPatternBtn.addEventListener('click', openLoadModal);
+            DOM.modalCancelBtn.addEventListener('click', closeSaveLoadModal);
+            DOM.modalCloseLoadBtn.addEventListener('click', closeSaveLoadModal);
+            DOM.saveLoadModal.addEventListener('click', (e) => {
+                if (e.target === DOM.saveLoadModal) closeSaveLoadModal();
+            });
+            DOM.modalSaveBtn.addEventListener('click', () => {
+                const name = DOM.savePatternName.value.trim() || 'Untitled pattern';
+                savePatternToDB(name).then(() => {
+                    closeSaveLoadModal();
+                }).catch(() => alert('Could not save pattern.'));
+            });
+            DOM.savePatternName.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') DOM.modalSaveBtn.click();
+                if (e.key === 'Escape') closeSaveLoadModal();
+            });
+        }
 
         /**
          * UTILS & SETUP
@@ -683,10 +1483,15 @@
             
             DOM.clearCanvasBtn.addEventListener('click', () => {
                 if(confirm('Clear entire pattern?')) {
+                    pushUndo();
                     state.cells = {};
                     updateDimensions(); // re-render
                 }
             });
+
+            DOM.undoBtn.addEventListener('click', undo);
+            DOM.redoBtn.addEventListener('click', redo);
+            updateUndoRedoButtons();
             
             setupExport();
         }
@@ -781,6 +1586,12 @@
                     updateColorUI();
                 }
             });
+
+            window.setColorFromHex = function(hex) {
+                if (!hex || !/^#[0-9A-F]{6}$/i.test(hex)) return;
+                state.color = hexToHsv(hex);
+                updateColorUI();
+            };
 
             DOM.addToPaletteBtn.addEventListener('click', () => {
                 if (!state.palette.includes(state.hex)) {
