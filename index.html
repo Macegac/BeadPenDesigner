@@ -333,9 +333,9 @@
         <!-- Viewport -->
         <div class="flex-1 overflow-auto bg-slate-100 relative p-12 canvas-container cursor-grab" id="scroll-container">
             <!-- Navigation instructions overlay (bottom-right of canvas viewport) -->
-            <div id="nav-instructions-overlay" class="absolute bottom-4 right-4 flex gap-4 text-xs text-slate-500 items-center pointer-events-none bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-                <span><i class="fa-regular fa-circle-dot"></i> Ctrl+Wheel Zoom</span>
-                <span><i class="fa-solid fa-up-down-left-right"></i> Middle-Click Pan</span>
+            <div id="nav-instructions-overlay" class="absolute bottom-4 right-4 flex flex-col gap-1 text-xs text-slate-500 pointer-events-none bg-white/90 backdrop-blur-sm px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+                <span><i class="fa-regular fa-circle-dot"></i> Ctrl+Wheel Zoom · <i class="fa-solid fa-up-down-left-right"></i> Middle-Click Pan</span>
+                <span><i class="fa-solid fa-mobile-screen"></i> Pinch to zoom · Two-finger pan</span>
             </div>
             
             <!-- Canvas Wrapper (Scalable) -->
@@ -525,16 +525,22 @@
             setupSaveLoad();
             setupZoom();
             setupPan();
+            setupTouchGestures();
             
             updateDimensions();
         }
 
         /** Get SVG point in mm from mouse event (relative to grid-svg) */
         function svgPointFromEvent(e) {
+            return svgPointFromClient(e.clientX, e.clientY);
+        }
+
+        /** Get SVG point in mm from client coordinates (for touch) */
+        function svgPointFromClient(clientX, clientY) {
             const svg = DOM.svg;
             const pt = svg.createSVGPoint();
-            pt.x = e.clientX;
-            pt.y = e.clientY;
+            pt.x = clientX;
+            pt.y = clientY;
             const mat = svg.getScreenCTM().inverse();
             const t = pt.matrixTransform(mat);
             return { x: t.x, y: t.y };
@@ -935,6 +941,7 @@
             let isPainting = false;
             let isErasing = false;
             let drawStart = null;
+            let lastTouchPt = null;
 
             function paintCell(target) {
                 if (target.tagName === 'circle') {
@@ -1085,6 +1092,7 @@
             function handleTouch(e) {
                 e.preventDefault();
                 const touch = e.touches[0];
+                if (!touch) return;
                 const target = document.elementFromPoint(touch.clientX, touch.clientY);
                 if (target && target.tagName === 'circle' && DOM.svg.contains(target)) {
                     if (state.tool === 'eyedropper') {
@@ -1100,6 +1108,22 @@
             }
             
             DOM.svg.addEventListener('touchstart', (e) => {
+                if (e.touches.length > 1) return;
+                const touch = e.touches[0];
+                const pt = svgPointFromClient(touch.clientX, touch.clientY);
+                if (state.tool === 'fill') {
+                    e.preventDefault();
+                    const key = getCellKeyAtPoint(pt.x, pt.y);
+                    if (key) floodFill(key);
+                    return;
+                }
+                if (state.tool === 'line' || state.tool === 'circle' || state.tool === 'square') {
+                    e.preventDefault();
+                    drawStart = { x: pt.x, y: pt.y };
+                    lastTouchPt = { x: pt.x, y: pt.y };
+                    updatePreviewShape(state.tool, pt.x, pt.y, pt.x, pt.y);
+                    return;
+                }
                 if (state.tool === 'eyedropper') {
                     handleTouch(e);
                     return;
@@ -1111,7 +1135,52 @@
             }, {passive: false});
             
             DOM.svg.addEventListener('touchmove', (e) => {
-                if(isPainting) handleTouch(e);
+                if (e.touches.length > 1) return;
+                const touch = e.touches[0];
+                if (drawStart && (state.tool === 'line' || state.tool === 'circle' || state.tool === 'square')) {
+                    e.preventDefault();
+                    const pt = svgPointFromClient(touch.clientX, touch.clientY);
+                    lastTouchPt = pt;
+                    updatePreviewShape(state.tool, drawStart.x, drawStart.y, pt.x, pt.y);
+                    return;
+                }
+                if (isPainting) {
+                    handleTouch(e);
+                }
+            }, {passive: false});
+            
+            DOM.svg.addEventListener('touchend', (e) => {
+                if (e.touches.length > 1) return;
+                if (drawStart && (state.tool === 'line' || state.tool === 'circle' || state.tool === 'square') && e.changedTouches.length) {
+                    const end = e.changedTouches[0];
+                    const pt = lastTouchPt || svgPointFromClient(end.clientX, end.clientY);
+                    let keys = [];
+                    if (state.tool === 'line') keys = getCellsInLine(drawStart.x, drawStart.y, pt.x, pt.y);
+                    else if (state.tool === 'circle') {
+                        const cx = (drawStart.x + pt.x) / 2, cy = (drawStart.y + pt.y) / 2;
+                        const r = Math.sqrt((pt.x - drawStart.x) ** 2 + (pt.y - drawStart.y) ** 2) / 2;
+                        keys = getCellsInCircle(cx, cy, r);
+                    } else keys = getCellsInRect(drawStart.x, drawStart.y, pt.x, pt.y);
+                    pushUndo();
+                    applyCellsToState(keys);
+                    clearPreview();
+                    drawStart = null;
+                    lastTouchPt = null;
+                }
+                if (e.touches.length === 0) {
+                    isPainting = false;
+                    isErasing = false;
+                }
+            }, {passive: false});
+            
+            DOM.svg.addEventListener('touchcancel', (e) => {
+                if (e.touches.length === 0) {
+                    drawStart = null;
+                    lastTouchPt = null;
+                    isPainting = false;
+                    isErasing = false;
+                    clearPreview();
+                }
             }, {passive: false});
         }
 
@@ -1443,6 +1512,67 @@
                     DOM.container.classList.remove('cursor-grabbing');
                 }
             });
+        }
+
+        /** Pinch-to-zoom and two-finger pan on canvas container (touch devices) */
+        function setupTouchGestures() {
+            let pinchState = null;
+
+            function getTouchCenter(touches) {
+                const t0 = touches[0], t1 = touches[1];
+                return {
+                    clientX: (t0.clientX + t1.clientX) / 2,
+                    clientY: (t0.clientY + t1.clientY) / 2
+                };
+            }
+
+            function getTouchDistance(touches) {
+                const t0 = touches[0], t1 = touches[1];
+                return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+            }
+
+            function setZoom(z) {
+                state.zoom = Math.max(0.2, Math.min(5.0, z));
+                DOM.scaler.style.transform = `scale(${state.zoom})`;
+                DOM.zoomLabel.textContent = `${Math.round(state.zoom * 100)}%`;
+            }
+
+            DOM.container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    const rect = DOM.container.getBoundingClientRect();
+                    const center = getTouchCenter(e.touches);
+                    pinchState = {
+                        initialDistance: getTouchDistance(e.touches),
+                        initialZoom: state.zoom,
+                        initialScrollLeft: DOM.container.scrollLeft,
+                        initialScrollTop: DOM.container.scrollTop,
+                        initialCenterX: center.clientX,
+                        initialCenterY: center.clientY
+                    };
+                }
+            }, { passive: false });
+
+            DOM.container.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 2 && pinchState) {
+                    e.preventDefault();
+                    const distance = getTouchDistance(e.touches);
+                    const center = getTouchCenter(e.touches);
+                    const zoomRatio = distance / pinchState.initialDistance;
+                    const newZoom = Math.max(0.2, Math.min(5.0, pinchState.initialZoom * zoomRatio));
+                    setZoom(newZoom);
+                    DOM.container.scrollLeft = pinchState.initialScrollLeft - (center.clientX - pinchState.initialCenterX);
+                    DOM.container.scrollTop = pinchState.initialScrollTop - (center.clientY - pinchState.initialCenterY);
+                }
+            }, { passive: false });
+
+            DOM.container.addEventListener('touchend', (e) => {
+                if (e.touches.length < 2) pinchState = null;
+            }, { passive: false });
+
+            DOM.container.addEventListener('touchcancel', () => {
+                pinchState = null;
+            }, { passive: false });
         }
 
         function setupGridInputs() {
